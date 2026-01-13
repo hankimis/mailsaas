@@ -104,9 +104,8 @@ export default function EmailsPage() {
   };
 
   const handleOpenWebmail = () => {
-    // Try Roundcube webmail directly
-    const webmailUrl = 'https://host51.registrar-servers.com:2096/webmail/';
-    window.open(webmailUrl, '_blank');
+    // Direct webmail login page
+    window.open('https://host51.registrar-servers.com:2096/', '_blank');
   };
 
   // Validate password strength for cPanel (requires 80+ strength rating)
