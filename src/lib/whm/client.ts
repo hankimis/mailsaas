@@ -137,7 +137,7 @@ class WHMClient {
   // ============================================
 
   /**
-   * Create email account via cPanel UAPI
+   * Create email account via cPanel UAPI (through WHM)
    */
   async createEmailAccount(params: {
     cpanelUser: string;
@@ -148,9 +148,13 @@ class WHMClient {
   }) {
     const [localPart] = params.email.split('@');
 
-    const response = await this.client.get('/execute/Email/add_pop', {
+    // Use WHM's cpanel API gateway
+    const response = await this.client.get('/json-api/cpanel', {
       params: {
+        api_version: 1,
         cpanel_jsonapi_user: params.cpanelUser,
+        cpanel_jsonapi_module: 'Email',
+        cpanel_jsonapi_func: 'add_pop',
         cpanel_jsonapi_apiversion: 3,
         email: localPart,
         password: params.password,
@@ -172,9 +176,12 @@ class WHMClient {
   }) {
     const [localPart] = params.email.split('@');
 
-    const response = await this.client.get('/execute/Email/delete_pop', {
+    const response = await this.client.get('/json-api/cpanel', {
       params: {
+        api_version: 1,
         cpanel_jsonapi_user: params.cpanelUser,
+        cpanel_jsonapi_module: 'Email',
+        cpanel_jsonapi_func: 'delete_pop',
         cpanel_jsonapi_apiversion: 3,
         email: localPart,
         domain: params.domain,
@@ -195,9 +202,12 @@ class WHMClient {
   }) {
     const [localPart] = params.email.split('@');
 
-    const response = await this.client.get('/execute/Email/passwd_pop', {
+    const response = await this.client.get('/json-api/cpanel', {
       params: {
+        api_version: 1,
         cpanel_jsonapi_user: params.cpanelUser,
+        cpanel_jsonapi_module: 'Email',
+        cpanel_jsonapi_func: 'passwd_pop',
         cpanel_jsonapi_apiversion: 3,
         email: localPart,
         password: params.password,
@@ -218,9 +228,12 @@ class WHMClient {
   }) {
     const [localPart] = params.email.split('@');
 
-    const response = await this.client.get('/execute/Email/get_pop_quota', {
+    const response = await this.client.get('/json-api/cpanel', {
       params: {
+        api_version: 1,
         cpanel_jsonapi_user: params.cpanelUser,
+        cpanel_jsonapi_module: 'Email',
+        cpanel_jsonapi_func: 'get_pop_quota',
         cpanel_jsonapi_apiversion: 3,
         email: `${localPart}@${params.domain}`,
       },
@@ -236,10 +249,39 @@ class WHMClient {
     cpanelUser: string;
     domain: string;
   }) {
-    const response = await this.client.get('/execute/Email/list_pops_with_disk', {
+    const response = await this.client.get('/json-api/cpanel', {
       params: {
+        api_version: 1,
         cpanel_jsonapi_user: params.cpanelUser,
+        cpanel_jsonapi_module: 'Email',
+        cpanel_jsonapi_func: 'list_pops_with_disk',
         cpanel_jsonapi_apiversion: 3,
+        domain: params.domain,
+      },
+    });
+
+    return response.data;
+  }
+
+  // ============================================
+  // Webmail Session Management
+  // ============================================
+
+  /**
+   * Create webmail session for auto-login (SSO)
+   */
+  async createWebmailSession(params: {
+    login: string;
+    domain: string;
+  }) {
+    const response = await this.client.get('/json-api/cpanel', {
+      params: {
+        api_version: 1,
+        cpanel_jsonapi_user: this.config.username,
+        cpanel_jsonapi_module: 'Session',
+        cpanel_jsonapi_func: 'create_webmail_session_for_mail_user',
+        cpanel_jsonapi_apiversion: 3,
+        login: params.login,
         domain: params.domain,
       },
     });

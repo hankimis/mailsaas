@@ -22,64 +22,92 @@ export function useAuth() {
 
   const supabase = getClient();
 
-  const fetchSessionUser = useCallback(async (userId: string) => {
-    const { data, error } = await (supabase.rpc as Function)(
-      'get_user_with_company',
-      { user_id: userId }
-    );
+  const fetchSessionUser = useCallback(async (userId: string): Promise<SessionUser | null> => {
+    console.log('fetchSessionUser called with userId:', userId);
 
-    if (error || !data || data.length === 0) {
-      console.error('Failed to fetch session user:', error);
+    try {
+      const { data, error } = await (supabase.rpc as Function)(
+        'get_user_with_company',
+        { user_id: userId }
+      );
+
+      console.log('RPC get_user_with_company result:', { data, error });
+
+      if (error) {
+        console.error('Failed to fetch session user:', error);
+        return null;
+      }
+
+      if (!data || data.length === 0) {
+        console.error('No session user data returned for userId:', userId);
+        return null;
+      }
+
+      console.log('Session user fetched:', data[0]);
+      return data[0] as SessionUser;
+    } catch (error) {
+      console.error('fetchSessionUser error:', error);
       return null;
     }
-
-    return data[0] as SessionUser;
   }, [supabase]);
 
   useEffect(() => {
-    const initAuth = async () => {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
+    let isMounted = true;
 
-        if (user) {
-          const sessionUser = await fetchSessionUser(user.id);
-          setState({
-            user,
-            sessionUser,
-            isLoading: false,
-            isAuthenticated: true,
-          });
-        } else {
-          setState({
-            user: null,
-            sessionUser: null,
-            isLoading: false,
-            isAuthenticated: false,
-          });
-        }
-      } catch (error) {
-        console.error('Auth init error:', error);
-        setState({
-          user: null,
-          sessionUser: null,
+    const loadSessionUser = async (userId: string) => {
+      try {
+        const sessionUser = await fetchSessionUser(userId);
+        if (!isMounted) return;
+
+        setState(prev => ({
+          ...prev,
+          sessionUser,
           isLoading: false,
-          isAuthenticated: false,
-        });
+        }));
+      } catch (error) {
+        console.error('Load session user error:', error);
+        if (!isMounted) return;
+        setState(prev => ({ ...prev, isLoading: false }));
       }
     };
 
-    initAuth();
-
+    // onAuthStateChange를 먼저 등록하고, 초기 세션 확인
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (event === 'SIGNED_IN' && session?.user) {
-          const sessionUser = await fetchSessionUser(session.user.id);
-          setState({
+      (event, session) => {
+        console.log('Auth state change:', event, session?.user?.id);
+
+        if (!isMounted) return;
+
+        if (event === 'INITIAL_SESSION') {
+          // 초기 세션 로드
+          if (session?.user) {
+            setState(prev => ({
+              ...prev,
+              user: session.user,
+              isAuthenticated: true,
+            }));
+            loadSessionUser(session.user.id);
+          } else {
+            setState({
+              user: null,
+              sessionUser: null,
+              isLoading: false,
+              isAuthenticated: false,
+            });
+          }
+        } else if (event === 'SIGNED_IN' && session?.user) {
+          setState(prev => ({
+            ...prev,
             user: session.user,
-            sessionUser,
-            isLoading: false,
             isAuthenticated: true,
-          });
+          }));
+          loadSessionUser(session.user.id);
+        } else if (event === 'TOKEN_REFRESHED' && session?.user) {
+          setState(prev => ({
+            ...prev,
+            user: session.user,
+            isAuthenticated: true,
+          }));
         } else if (event === 'SIGNED_OUT') {
           setState({
             user: null,
@@ -92,12 +120,27 @@ export function useAuth() {
     );
 
     return () => {
+      isMounted = false;
       subscription.unsubscribe();
     };
   }, [supabase, fetchSessionUser]);
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
+    try {
+      // 상태 먼저 초기화
+      setState({
+        user: null,
+        sessionUser: null,
+        isLoading: false,
+        isAuthenticated: false,
+      });
+      // 그 다음 Supabase 로그아웃
+      await supabase.auth.signOut();
+      // 로그인 페이지로 리다이렉트
+      window.location.href = '/login';
+    } catch (error) {
+      console.error('Sign out error:', error);
+    }
   }, [supabase]);
 
   const refreshUser = useCallback(async () => {

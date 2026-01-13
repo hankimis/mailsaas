@@ -38,7 +38,10 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const fetchDashboardData = async () => {
-      if (!sessionUser?.company_id) return;
+      if (!sessionUser?.company_id) {
+        setIsLoading(false);
+        return;
+      }
 
       const supabase = getClient();
 
@@ -85,12 +88,18 @@ export default function DashboardPage() {
       }
     };
 
-    if (sessionUser) {
-      fetchDashboardData();
+    // authLoading이 끝난 후에만 데이터 fetch
+    if (!authLoading) {
+      if (sessionUser) {
+        fetchDashboardData();
+      } else {
+        setIsLoading(false);
+      }
     }
-  }, [sessionUser]);
+  }, [sessionUser, authLoading]);
 
-  if (authLoading || isLoading) {
+  // 인증 로딩 중이거나, 인증되었는데 데이터 로딩 중일 때만 스켈레톤 표시
+  if (authLoading || (sessionUser && isLoading)) {
     return <DashboardSkeleton />;
   }
 

@@ -419,6 +419,108 @@ export async function getEmailQuotaUsage(userId: string): Promise<{
 }
 
 /**
+ * Create email account - Simple version
+ * Uses the main WHM account for all email accounts (임시 도메인 지원)
+ */
+export async function createEmailAccountSimple({
+  userId,
+  companyId,
+  email,
+  password,
+}: CreateEmailParams): Promise<EmailAccountResult> {
+  const supabase = createServiceClient();
+
+  try {
+    // Get company info
+    const { data: companyData, error: companyError } = await supabase
+      .from('companies')
+      .select('domain, use_temp_domain, temp_subdomain, cpanel_username')
+      .eq('id', companyId)
+      .single();
+
+    if (companyError) {
+      console.error('Company fetch error:', companyError);
+      return { success: false, error: 'Company not found' };
+    }
+
+    const company = companyData as {
+      domain: string | null;
+      use_temp_domain: boolean;
+      temp_subdomain: string | null;
+      cpanel_username: string | null;
+    } | null;
+
+    if (!company) {
+      return { success: false, error: 'Company not found' };
+    }
+
+    // Determine which domain to use
+    const domain = company.use_temp_domain && company.temp_subdomain
+      ? company.temp_subdomain
+      : company.domain;
+
+    if (!domain) {
+      return { success: false, error: 'No domain configured for company' };
+    }
+
+    // Use the main WHM account username from env
+    const cpanelUser = process.env.WHM_USERNAME || 'mymakurv';
+
+    console.log(`Creating email account: ${email} on domain ${domain} with cPanel user ${cpanelUser}`);
+
+    // Create email account in cPanel
+    const result = await whmClient.createEmailAccount({
+      cpanelUser,
+      email,
+      password,
+      quota: 1000, // 1GB
+      domain,
+    });
+
+    console.log('WHM createEmailAccount result:', JSON.stringify(result, null, 2));
+
+    // WHM cpanel API response format: { result: { status, errors, data, ... } }
+    const apiResult = result.result || result;
+
+    // Check for errors in the response
+    if (apiResult.errors && apiResult.errors.length > 0) {
+      return { success: false, error: apiResult.errors.join(', ') };
+    }
+
+    // Check status (0 = failure, 1 = success)
+    if (apiResult.status === 0) {
+      const errorMsg = apiResult.errors?.[0] || apiResult.statusmsg || 'Email creation failed';
+      return { success: false, error: errorMsg };
+    }
+
+    // Update user with email account info
+    const emailAccountId = email;
+
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({
+        email_account_id: emailAccountId,
+        email_account_status: 'active' as EmailAccountStatus,
+        email_quota_mb: 1000,
+      } as unknown as never)
+      .eq('id', userId);
+
+    if (updateError) {
+      console.error('User update error:', updateError);
+      // Email was created but DB update failed - still consider it success
+    }
+
+    return { success: true, emailAccountId };
+  } catch (error) {
+    console.error('Create email account simple error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
  * Generate DNS records for email
  */
 export function generateEmailDNSRecords(domain: string, mailServer: string) {

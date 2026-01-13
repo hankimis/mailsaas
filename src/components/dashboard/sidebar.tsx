@@ -90,7 +90,7 @@ const bottomNavItems: NavItem[] = [
   },
   {
     title: '도움말',
-    href: '/help',
+    href: '/support',
     icon: HelpCircle,
   },
 ];

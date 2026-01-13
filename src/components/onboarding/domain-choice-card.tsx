@@ -18,7 +18,7 @@ interface DomainChoiceOption {
 const options: DomainChoiceOption[] = [
   {
     value: 'self_managed',
-    title: '도메인 직접 관리',
+    title: '도메인 직접 관리하고 있음',
     description: '도메인 DNS를 직접 설정할 수 있습니다.',
     icon: Globe,
     badge: '추천',
