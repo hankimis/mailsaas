@@ -466,7 +466,24 @@ export async function createEmailAccountSimple({
     // Use the main WHM account username from env
     const cpanelUser = process.env.WHM_USERNAME || 'mymakurv';
 
-    console.log(`Creating email account: ${email} on domain ${domain} with cPanel user ${cpanelUser}`);
+    // Check if domain exists in cPanel, if not add it as addon domain
+    const domainExists = await whmClient.domainExists({ cpanelUser, domain });
+    if (!domainExists) {
+      const addDomainResult = await whmClient.addAddonDomain({
+        cpanelUser,
+        domain,
+      });
+
+      // Check if addon domain was added successfully
+      const addResult = addDomainResult?.cpanelresult?.data?.[0] || addDomainResult?.cpanelresult || {};
+      if (addResult.result === 0 || addResult.error) {
+        const errorMsg = addResult.reason || addResult.error || 'Failed to add domain to cPanel';
+        // If domain already exists (perhaps as main domain), ignore the error
+        if (!errorMsg.includes('already exists') && !errorMsg.includes('is already configured')) {
+          return { success: false, error: `도메인 추가 실패: ${errorMsg}` };
+        }
+      }
+    }
 
     // Create email account in cPanel
     const result = await whmClient.createEmailAccount({
@@ -476,8 +493,6 @@ export async function createEmailAccountSimple({
       quota: 1000, // 1GB
       domain,
     });
-
-    console.log('WHM createEmailAccount result:', JSON.stringify(result, null, 2));
 
     // WHM cpanel API response format: { result: { status, errors, data, ... } }
     const apiResult = result.result || result;

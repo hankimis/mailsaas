@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import {
   Table,
   TableBody,
@@ -42,7 +42,7 @@ interface EmployeeTableProps {
   isLoading?: boolean;
 }
 
-export function EmployeeTable({
+export const EmployeeTable = memo(function EmployeeTable({
   employees,
   onToggleKakaoAlert,
   onEditEmployee,
@@ -294,4 +294,4 @@ export function EmployeeTable({
       </AlertDialog>
     </>
   );
-}
+});

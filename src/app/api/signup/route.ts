@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { createStripeCustomer, createSubscription } from '@/lib/stripe/subscription';
 import { addDNSVerificationJob, addEmailProvisioningJob } from '@/lib/bullmq/queues';
 import { generateEmailDNSRecords } from '@/lib/whm/email-service';
+import { rateLimit, getClientIP, RATE_LIMITS } from '@/lib/rate-limit';
 import type { DomainManagementType } from '@/types/database';
 
 interface SignupRequestBody {
@@ -20,6 +21,24 @@ interface SignupRequestBody {
 }
 
 export async function POST(request: NextRequest) {
+  // Rate limiting
+  const clientIP = getClientIP(request);
+  const rateLimitResult = rateLimit(`signup:${clientIP}`, RATE_LIMITS.signup);
+
+  if (!rateLimitResult.success) {
+    return NextResponse.json(
+      { error: '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.' },
+      {
+        status: 429,
+        headers: {
+          'X-RateLimit-Limit': rateLimitResult.limit.toString(),
+          'X-RateLimit-Remaining': rateLimitResult.remaining.toString(),
+          'X-RateLimit-Reset': rateLimitResult.resetTime.toString(),
+        },
+      }
+    );
+  }
+
   try {
     const body: SignupRequestBody = await request.json();
     const supabase = createServiceClient();
@@ -79,7 +98,6 @@ export async function POST(request: NextRequest) {
     const company = companyData as { id: string } | null;
 
     if (companyError || !company) {
-      console.error('Company creation error:', companyError);
       return NextResponse.json(
         { error: '회사 생성에 실패했습니다' },
         { status: 500 }
@@ -100,7 +118,6 @@ export async function POST(request: NextRequest) {
       } as unknown as never);
 
     if (userError) {
-      console.error('User creation error:', userError);
       // Rollback company creation
       await supabase.from('companies').delete().eq('id', company.id);
       return NextResponse.json(
@@ -114,7 +131,7 @@ export async function POST(request: NextRequest) {
       user_id: body.user_id,
     } as unknown as never);
 
-    // Create Stripe customer
+    // Create Stripe customer (optional - skip if Stripe is not configured)
     let stripeCustomerId: string | null = null;
     try {
       stripeCustomerId = await createStripeCustomer(
@@ -122,8 +139,7 @@ export async function POST(request: NextRequest) {
         body.admin_email,
         body.company_name
       );
-    } catch (stripeError) {
-      console.error('Stripe customer creation error:', stripeError);
+    } catch {
       // Continue without Stripe - can be set up later
     }
 
@@ -143,16 +159,15 @@ export async function POST(request: NextRequest) {
         } as unknown as never);
       }
 
-      // Start DNS verification job
+      // Start DNS verification job (optional - skip if Redis is not available)
       if (body.domain_management_type !== 'no_domain') {
         try {
           await addDNSVerificationJob({
             companyId: company.id,
             domain: body.domain,
           });
-        } catch (jobError) {
-          console.error('DNS verification job error:', jobError);
-          // Continue - DNS verification can be triggered later
+        } catch {
+          // Continue - DNS verification can be triggered later manually
         }
       }
     }
@@ -174,8 +189,7 @@ export async function POST(request: NextRequest) {
       stripe_customer_id: stripeCustomerId,
       message: '회사가 생성되었습니다',
     });
-  } catch (error) {
-    console.error('Signup error:', error);
+  } catch {
     return NextResponse.json(
       { error: '서버 오류가 발생했습니다' },
       { status: 500 }

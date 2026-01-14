@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { solapiClient } from '@/lib/solapi/client';
 import { KAKAO_TEMPLATES, buildEmployeeInviteVariables } from '@/lib/solapi/templates';
+import { rateLimit, getClientIP, RATE_LIMITS } from '@/lib/rate-limit';
 import crypto from 'crypto';
 import type { User, Company, EmployeeInvitation } from '@/types/database';
 
@@ -16,6 +17,17 @@ interface CreateInvitationBody {
 
 // POST: Create invitation and send KakaoTalk
 export async function POST(request: NextRequest) {
+  // Rate limiting
+  const clientIP = getClientIP(request);
+  const rateLimitResult = rateLimit(`invitation:${clientIP}`, RATE_LIMITS.invitation);
+
+  if (!rateLimitResult.success) {
+    return NextResponse.json(
+      { error: '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.' },
+      { status: 429 }
+    );
+  }
+
   try {
     const supabase = await createClient();
     const serviceClient = createServiceClient();

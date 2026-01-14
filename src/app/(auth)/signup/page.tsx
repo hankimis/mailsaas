@@ -132,9 +132,17 @@ export default function SignupPage() {
       });
 
       if (authError) {
-        console.error('Supabase auth error:', authError);
+        // 사용자 친화적 에러 메시지 처리
+        let errorMessage = authError.message;
+        if (authError.message.includes('User already registered')) {
+          errorMessage = '이미 가입된 이메일입니다. 로그인 페이지에서 로그인해주세요.';
+        } else if (authError.message.includes('Invalid email')) {
+          errorMessage = '유효하지 않은 이메일 형식입니다.';
+        } else if (authError.message.includes('Password')) {
+          errorMessage = '비밀번호는 6자 이상이어야 합니다.';
+        }
         toast.error('회원가입 실패', {
-          description: authError.message,
+          description: errorMessage,
         });
         return;
       }
@@ -145,28 +153,42 @@ export default function SignupPage() {
       }
 
       // 2. Create company and user via API
-      const response = await fetch('/api/signup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: authData.user.id,
-          company_name: data.company_name,
-          company_slug: data.company_slug,
-          domain: data.domain || null,
-          domain_management_type: data.domain_management_type,
-          admin_email: data.admin_email,
-          admin_name: data.admin_name,
-          admin_phone: data.admin_phone,
-          agency_name: data.agency_name,
-          agency_email: data.agency_email,
-          agency_phone: data.agency_phone,
-        }),
-      });
+      let response;
+      try {
+        response = await fetch('/api/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: authData.user.id,
+            company_name: data.company_name,
+            company_slug: data.company_slug,
+            domain: data.domain || null,
+            domain_management_type: data.domain_management_type,
+            admin_email: data.admin_email,
+            admin_name: data.admin_name,
+            admin_phone: data.admin_phone,
+            agency_name: data.agency_name,
+            agency_email: data.agency_email,
+            agency_phone: data.agency_phone,
+          }),
+        });
+      } catch (fetchError) {
+        toast.error('서버 연결 실패', {
+          description: '서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.',
+        });
+        return;
+      }
 
       if (!response.ok) {
-        const error = await response.json();
+        let errorMessage = '회사 생성 중 오류가 발생했습니다';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorData.message || errorMessage;
+        } catch {
+          // JSON 파싱 실패 시 기본 메시지 사용
+        }
         toast.error('회사 생성 실패', {
-          description: error.message,
+          description: errorMessage,
         });
         return;
       }
@@ -177,9 +199,10 @@ export default function SignupPage() {
 
       // Redirect to payment or dashboard
       router.push('/signup/payment');
-    } catch (error) {
-      console.error('Signup error:', error);
-      toast.error('오류가 발생했습니다');
+    } catch {
+      toast.error('오류가 발생했습니다', {
+        description: '잠시 후 다시 시도해주세요.',
+      });
     } finally {
       setIsLoading(false);
     }

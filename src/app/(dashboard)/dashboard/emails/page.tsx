@@ -62,10 +62,10 @@ export default function EmailsPage() {
           .single();
 
         if (userData) {
-          setUser(userData);
+          setUser(userData as User);
         }
 
-        // Fetch company data
+        // Fetch company data if available
         if (sessionUser.company_id) {
           const { data: companyData } = await supabase
             .from('companies')
@@ -74,7 +74,7 @@ export default function EmailsPage() {
             .single();
 
           if (companyData) {
-            setCompany(companyData);
+            setCompany(companyData as Company);
           }
         }
       } catch (error) {
@@ -103,9 +103,34 @@ export default function EmailsPage() {
     }
   };
 
-  const handleOpenWebmail = () => {
-    // Direct webmail login page
-    window.open('https://host51.registrar-servers.com:2096/', '_blank');
+  const [isOpeningWebmail, setIsOpeningWebmail] = useState(false);
+
+  const handleOpenWebmail = async () => {
+    setIsOpeningWebmail(true);
+    try {
+      // Try to get auto-login session URL
+      const response = await fetch('/api/emails/webmail-session');
+      const data = await response.json();
+
+      if (data.url) {
+        window.open(data.url, '_blank');
+        if (!data.autoLogin) {
+          toast.info('자동 로그인을 사용할 수 없습니다', {
+            description: '이메일과 비밀번호로 직접 로그인해주세요.',
+          });
+        }
+      } else {
+        // Fallback to direct URL
+        window.open('https://host51.registrar-servers.com:2096/', '_blank');
+        toast.info('직접 로그인해주세요');
+      }
+    } catch {
+      // Fallback on error
+      window.open('https://host51.registrar-servers.com:2096/', '_blank');
+      toast.info('직접 로그인해주세요');
+    } finally {
+      setIsOpeningWebmail(false);
+    }
   };
 
   // Validate password strength for cPanel (requires 80+ strength rating)
@@ -335,9 +360,13 @@ export default function EmailsPage() {
 
           {/* Actions */}
           <div className="flex flex-wrap gap-3">
-            <Button onClick={handleOpenWebmail} disabled={!isEmailActive}>
-              <ExternalLink className="mr-2 h-4 w-4" />
-              웹메일 열기
+            <Button onClick={handleOpenWebmail} disabled={!isEmailActive || isOpeningWebmail}>
+              {isOpeningWebmail ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <ExternalLink className="mr-2 h-4 w-4" />
+              )}
+              {isOpeningWebmail ? '연결 중...' : '웹메일 열기'}
             </Button>
             {isEmailActive && (
               <Button variant="outline" onClick={() => setShowPasswordDialog(true)}>

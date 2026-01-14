@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { createEmailAccountSimple } from '@/lib/whm/email-service';
+import { encrypt } from '@/lib/crypto';
 
 interface UserData {
   company_id: string | null;
@@ -69,9 +70,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Save encrypted password for SSO auto-login
+    try {
+      const encryptedPassword = encrypt(password);
+      await serviceClient
+        .from('users')
+        .update({ email_password_encrypted: encryptedPassword } as never)
+        .eq('id', user.id);
+    } catch {
+      // Password encryption failed, but email account was created
+      // User can still login manually
+    }
+
     return NextResponse.json({
       success: true,
-      message: '이메일 계정이 생성되었습니다. 웹메일에서 로그인하세요.',
+      message: '이메일 계정이 생성되었습니다.',
     });
   } catch (error) {
     console.error('Create email account error:', error);

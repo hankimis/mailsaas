@@ -133,6 +133,71 @@ class WHMClient {
   }
 
   // ============================================
+  // Domain Management
+  // ============================================
+
+  /**
+   * Add addon domain to cPanel account
+   */
+  async addAddonDomain(params: {
+    cpanelUser: string;
+    domain: string;
+    subdomain?: string;
+    dir?: string;
+  }) {
+    const subdomain = params.subdomain || params.domain.replace(/\./g, '_');
+    const dir = params.dir || `/${params.domain}`;
+
+    const response = await this.client.get('/json-api/cpanel', {
+      params: {
+        api_version: 1,
+        cpanel_jsonapi_user: params.cpanelUser,
+        cpanel_jsonapi_module: 'AddonDomain',
+        cpanel_jsonapi_func: 'addaddondomain',
+        cpanel_jsonapi_apiversion: 2,
+        newdomain: params.domain,
+        subdomain: subdomain,
+        dir: dir,
+      },
+    });
+
+    return response.data;
+  }
+
+  /**
+   * List addon domains for a cPanel account
+   */
+  async listAddonDomains(cpanelUser: string) {
+    const response = await this.client.get('/json-api/cpanel', {
+      params: {
+        api_version: 1,
+        cpanel_jsonapi_user: cpanelUser,
+        cpanel_jsonapi_module: 'AddonDomain',
+        cpanel_jsonapi_func: 'listaddondomains',
+        cpanel_jsonapi_apiversion: 2,
+      },
+    });
+
+    return response.data;
+  }
+
+  /**
+   * Check if domain exists in cPanel account
+   */
+  async domainExists(params: {
+    cpanelUser: string;
+    domain: string;
+  }) {
+    try {
+      const result = await this.listAddonDomains(params.cpanelUser);
+      const domains = result?.cpanelresult?.data || [];
+      return domains.some((d: { domain: string }) => d.domain === params.domain);
+    } catch {
+      return false;
+    }
+  }
+
+  // ============================================
   // Email Account Management
   // ============================================
 

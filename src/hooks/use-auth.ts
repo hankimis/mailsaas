@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { User } from '@supabase/supabase-js';
 import { getClient } from '@/lib/supabase/client';
 import type { SessionUser, UserRole } from '@/types/database';
@@ -20,33 +20,26 @@ export function useAuth() {
     isAuthenticated: false,
   });
 
-  const supabase = getClient();
+  // Memoize supabase client reference to prevent unnecessary effect re-runs
+  const supabase = useMemo(() => getClient(), []);
 
   const fetchSessionUser = useCallback(async (userId: string): Promise<SessionUser | null> => {
-    console.log('fetchSessionUser called with userId:', userId);
-
     try {
       const { data, error } = await (supabase.rpc as Function)(
         'get_user_with_company',
         { user_id: userId }
       );
 
-      console.log('RPC get_user_with_company result:', { data, error });
-
       if (error) {
-        console.error('Failed to fetch session user:', error);
         return null;
       }
 
       if (!data || data.length === 0) {
-        console.error('No session user data returned for userId:', userId);
         return null;
       }
 
-      console.log('Session user fetched:', data[0]);
       return data[0] as SessionUser;
-    } catch (error) {
-      console.error('fetchSessionUser error:', error);
+    } catch {
       return null;
     }
   }, [supabase]);
@@ -64,8 +57,7 @@ export function useAuth() {
           sessionUser,
           isLoading: false,
         }));
-      } catch (error) {
-        console.error('Load session user error:', error);
+      } catch {
         if (!isMounted) return;
         setState(prev => ({ ...prev, isLoading: false }));
       }
@@ -74,8 +66,6 @@ export function useAuth() {
     // onAuthStateChange를 먼저 등록하고, 초기 세션 확인
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
-        console.log('Auth state change:', event, session?.user?.id);
-
         if (!isMounted) return;
 
         if (event === 'INITIAL_SESSION') {
@@ -138,8 +128,9 @@ export function useAuth() {
       await supabase.auth.signOut();
       // 로그인 페이지로 리다이렉트
       window.location.href = '/login';
-    } catch (error) {
-      console.error('Sign out error:', error);
+    } catch {
+      // Silent fail - redirect anyway
+      window.location.href = '/login';
     }
   }, [supabase]);
 

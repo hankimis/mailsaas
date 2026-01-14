@@ -70,7 +70,7 @@ export default function DashboardPage() {
           });
         }
 
-        // Fetch recent notifications
+        // Fetch notifications
         const { data: notificationData } = await supabase
           .from('notifications')
           .select('*')

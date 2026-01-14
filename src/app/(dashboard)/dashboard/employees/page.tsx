@@ -29,25 +29,25 @@ export default function EmployeesPage() {
     const supabase = getClient();
 
     try {
-      // Fetch company
+      // Fetch company data
       const { data: companyData } = await supabase
         .from('companies')
-        .select('*')
+        .select('id, name, domain, use_temp_domain, temp_subdomain, status, current_seat_count, kakao_alert_user_count')
         .eq('id', sessionUser.company_id)
         .single();
 
       if (companyData) {
-        setCompany(companyData);
+        setCompany(companyData as Company);
       }
 
       // Fetch employees
-      const { data: employeesData, error } = await supabase
+      const { data: employeesData, error: employeesError } = await supabase
         .from('users')
         .select('*')
         .eq('company_id', sessionUser.company_id)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (employeesError) throw employeesError;
 
       setEmployees(employeesData || []);
     } catch (error) {
@@ -89,9 +89,9 @@ export default function EmployeesPage() {
     }
   };
 
-  const handleEditEmployee = (employee: User) => {
-    // TODO: Implement edit dialog
-    console.log('Edit employee:', employee);
+  const handleEditEmployee = (_employee: User) => {
+    // 직원 편집 기능은 현재 미구현 - 삭제 후 재추가로 대체
+    toast.info('직원 정보 수정은 삭제 후 재추가해주세요');
   };
 
   const handleDeleteEmployee = async (userId: string) => {

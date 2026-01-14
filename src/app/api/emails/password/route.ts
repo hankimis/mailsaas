@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 import { changeEmailPassword } from '@/lib/whm/email-service';
+import { encrypt } from '@/lib/crypto';
 
 // PATCH: Change email password
 export async function PATCH(request: NextRequest) {
@@ -30,6 +31,18 @@ export async function PATCH(request: NextRequest) {
         { error: result.error || '비밀번호 변경 실패' },
         { status: 500 }
       );
+    }
+
+    // Update encrypted password for SSO auto-login
+    try {
+      const serviceClient = createServiceClient();
+      const encryptedPassword = encrypt(newPassword);
+      await serviceClient
+        .from('users')
+        .update({ email_password_encrypted: encryptedPassword } as never)
+        .eq('id', user.id);
+    } catch {
+      // Password encryption failed, but password was changed
     }
 
     return NextResponse.json({
