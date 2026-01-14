@@ -1,7 +1,5 @@
-import axios, { AxiosInstance } from 'axios';
-
 // ============================================
-// WHM API Client
+// WHM API Client (using native fetch)
 // ============================================
 
 interface WHMConfig {
@@ -23,7 +21,8 @@ interface WHMResponse<T = unknown> {
 }
 
 class WHMClient {
-  private client: AxiosInstance;
+  private baseURL: string;
+  private headers: HeadersInit;
   private config: WHMConfig;
 
   constructor(config?: Partial<WHMConfig>) {
@@ -35,15 +34,35 @@ class WHMClient {
       ssl: config?.ssl ?? (process.env.WHM_SSL === 'true'),
     };
 
-    const baseURL = `${this.config.ssl ? 'https' : 'http'}://${this.config.host}:${this.config.port}`;
+    this.baseURL = `${this.config.ssl ? 'https' : 'http'}://${this.config.host}:${this.config.port}`;
+    this.headers = {
+      Authorization: `whm ${this.config.username}:${this.config.apiToken}`,
+    };
+  }
 
-    this.client = axios.create({
-      baseURL,
-      headers: {
-        Authorization: `whm ${this.config.username}:${this.config.apiToken}`,
-      },
-      timeout: 30000,
+  // Helper to build URL with query params
+  private buildURL(endpoint: string, params: Record<string, string | number> = {}): string {
+    const url = new URL(`${this.baseURL}${endpoint}`);
+    Object.entries(params).forEach(([key, value]) => {
+      url.searchParams.append(key, String(value));
     });
+    return url.toString();
+  }
+
+  // Generic fetch wrapper with timeout
+  private async fetchWithTimeout(url: string, timeout = 30000): Promise<Response> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+    try {
+      const response = await fetch(url, {
+        headers: this.headers,
+        signal: controller.signal,
+      });
+      return response;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   // Generic API call
@@ -51,14 +70,24 @@ class WHMClient {
     endpoint: string,
     params: Record<string, string | number> = {}
   ): Promise<WHMResponse<T>> {
-    const response = await this.client.get(`/json-api/${endpoint}`, {
-      params: {
-        api_version: 1,
-        ...params,
-      },
+    const url = this.buildURL(`/json-api/${endpoint}`, {
+      api_version: 1,
+      ...params,
     });
 
-    return response.data;
+    const response = await this.fetchWithTimeout(url);
+    return response.json();
+  }
+
+  // cPanel API call helper
+  private async cpanelCall<T>(params: Record<string, string | number>): Promise<T> {
+    const url = this.buildURL('/json-api/cpanel', {
+      api_version: 1,
+      ...params,
+    });
+
+    const response = await this.fetchWithTimeout(url);
+    return response.json();
   }
 
   // ============================================
@@ -148,37 +177,27 @@ class WHMClient {
     const subdomain = params.subdomain || params.domain.replace(/\./g, '_');
     const dir = params.dir || `/${params.domain}`;
 
-    const response = await this.client.get('/json-api/cpanel', {
-      params: {
-        api_version: 1,
-        cpanel_jsonapi_user: params.cpanelUser,
-        cpanel_jsonapi_module: 'AddonDomain',
-        cpanel_jsonapi_func: 'addaddondomain',
-        cpanel_jsonapi_apiversion: 2,
-        newdomain: params.domain,
-        subdomain: subdomain,
-        dir: dir,
-      },
+    return this.cpanelCall({
+      cpanel_jsonapi_user: params.cpanelUser,
+      cpanel_jsonapi_module: 'AddonDomain',
+      cpanel_jsonapi_func: 'addaddondomain',
+      cpanel_jsonapi_apiversion: 2,
+      newdomain: params.domain,
+      subdomain: subdomain,
+      dir: dir,
     });
-
-    return response.data;
   }
 
   /**
    * List addon domains for a cPanel account
    */
   async listAddonDomains(cpanelUser: string) {
-    const response = await this.client.get('/json-api/cpanel', {
-      params: {
-        api_version: 1,
-        cpanel_jsonapi_user: cpanelUser,
-        cpanel_jsonapi_module: 'AddonDomain',
-        cpanel_jsonapi_func: 'listaddondomains',
-        cpanel_jsonapi_apiversion: 2,
-      },
+    return this.cpanelCall({
+      cpanel_jsonapi_user: cpanelUser,
+      cpanel_jsonapi_module: 'AddonDomain',
+      cpanel_jsonapi_func: 'listaddondomains',
+      cpanel_jsonapi_apiversion: 2,
     });
-
-    return response.data;
   }
 
   /**
@@ -189,9 +208,9 @@ class WHMClient {
     domain: string;
   }) {
     try {
-      const result = await this.listAddonDomains(params.cpanelUser);
+      const result = await this.listAddonDomains(params.cpanelUser) as { cpanelresult?: { data?: Array<{ domain: string }> } };
       const domains = result?.cpanelresult?.data || [];
-      return domains.some((d: { domain: string }) => d.domain === params.domain);
+      return domains.some((d) => d.domain === params.domain);
     } catch {
       return false;
     }
@@ -213,22 +232,16 @@ class WHMClient {
   }) {
     const [localPart] = params.email.split('@');
 
-    // Use WHM's cpanel API gateway
-    const response = await this.client.get('/json-api/cpanel', {
-      params: {
-        api_version: 1,
-        cpanel_jsonapi_user: params.cpanelUser,
-        cpanel_jsonapi_module: 'Email',
-        cpanel_jsonapi_func: 'add_pop',
-        cpanel_jsonapi_apiversion: 3,
-        email: localPart,
-        password: params.password,
-        quota: params.quota || 1000, // MB
-        domain: params.domain,
-      },
+    return this.cpanelCall({
+      cpanel_jsonapi_user: params.cpanelUser,
+      cpanel_jsonapi_module: 'Email',
+      cpanel_jsonapi_func: 'add_pop',
+      cpanel_jsonapi_apiversion: 3,
+      email: localPart,
+      password: params.password,
+      quota: params.quota || 1000, // MB
+      domain: params.domain,
     });
-
-    return response.data;
   }
 
   /**
@@ -241,19 +254,14 @@ class WHMClient {
   }) {
     const [localPart] = params.email.split('@');
 
-    const response = await this.client.get('/json-api/cpanel', {
-      params: {
-        api_version: 1,
-        cpanel_jsonapi_user: params.cpanelUser,
-        cpanel_jsonapi_module: 'Email',
-        cpanel_jsonapi_func: 'delete_pop',
-        cpanel_jsonapi_apiversion: 3,
-        email: localPart,
-        domain: params.domain,
-      },
+    return this.cpanelCall({
+      cpanel_jsonapi_user: params.cpanelUser,
+      cpanel_jsonapi_module: 'Email',
+      cpanel_jsonapi_func: 'delete_pop',
+      cpanel_jsonapi_apiversion: 3,
+      email: localPart,
+      domain: params.domain,
     });
-
-    return response.data;
   }
 
   /**
@@ -267,20 +275,15 @@ class WHMClient {
   }) {
     const [localPart] = params.email.split('@');
 
-    const response = await this.client.get('/json-api/cpanel', {
-      params: {
-        api_version: 1,
-        cpanel_jsonapi_user: params.cpanelUser,
-        cpanel_jsonapi_module: 'Email',
-        cpanel_jsonapi_func: 'passwd_pop',
-        cpanel_jsonapi_apiversion: 3,
-        email: localPart,
-        password: params.password,
-        domain: params.domain,
-      },
+    return this.cpanelCall({
+      cpanel_jsonapi_user: params.cpanelUser,
+      cpanel_jsonapi_module: 'Email',
+      cpanel_jsonapi_func: 'passwd_pop',
+      cpanel_jsonapi_apiversion: 3,
+      email: localPart,
+      password: params.password,
+      domain: params.domain,
     });
-
-    return response.data;
   }
 
   /**
@@ -293,18 +296,13 @@ class WHMClient {
   }) {
     const [localPart] = params.email.split('@');
 
-    const response = await this.client.get('/json-api/cpanel', {
-      params: {
-        api_version: 1,
-        cpanel_jsonapi_user: params.cpanelUser,
-        cpanel_jsonapi_module: 'Email',
-        cpanel_jsonapi_func: 'get_pop_quota',
-        cpanel_jsonapi_apiversion: 3,
-        email: `${localPart}@${params.domain}`,
-      },
+    return this.cpanelCall({
+      cpanel_jsonapi_user: params.cpanelUser,
+      cpanel_jsonapi_module: 'Email',
+      cpanel_jsonapi_func: 'get_pop_quota',
+      cpanel_jsonapi_apiversion: 3,
+      email: `${localPart}@${params.domain}`,
     });
-
-    return response.data;
   }
 
   /**
@@ -314,18 +312,13 @@ class WHMClient {
     cpanelUser: string;
     domain: string;
   }) {
-    const response = await this.client.get('/json-api/cpanel', {
-      params: {
-        api_version: 1,
-        cpanel_jsonapi_user: params.cpanelUser,
-        cpanel_jsonapi_module: 'Email',
-        cpanel_jsonapi_func: 'list_pops_with_disk',
-        cpanel_jsonapi_apiversion: 3,
-        domain: params.domain,
-      },
+    return this.cpanelCall({
+      cpanel_jsonapi_user: params.cpanelUser,
+      cpanel_jsonapi_module: 'Email',
+      cpanel_jsonapi_func: 'list_pops_with_disk',
+      cpanel_jsonapi_apiversion: 3,
+      domain: params.domain,
     });
-
-    return response.data;
   }
 
   // ============================================
@@ -339,19 +332,14 @@ class WHMClient {
     login: string;
     domain: string;
   }) {
-    const response = await this.client.get('/json-api/cpanel', {
-      params: {
-        api_version: 1,
-        cpanel_jsonapi_user: this.config.username,
-        cpanel_jsonapi_module: 'Session',
-        cpanel_jsonapi_func: 'create_webmail_session_for_mail_user',
-        cpanel_jsonapi_apiversion: 3,
-        login: params.login,
-        domain: params.domain,
-      },
+    return this.cpanelCall({
+      cpanel_jsonapi_user: this.config.username,
+      cpanel_jsonapi_module: 'Session',
+      cpanel_jsonapi_func: 'create_webmail_session_for_mail_user',
+      cpanel_jsonapi_apiversion: 3,
+      login: params.login,
+      domain: params.domain,
     });
-
-    return response.data;
   }
 
   // ============================================

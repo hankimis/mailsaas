@@ -1,4 +1,3 @@
-import axios, { AxiosInstance } from 'axios';
 import crypto from 'crypto';
 
 // ============================================
@@ -32,7 +31,7 @@ interface MessageStatus {
 }
 
 class SolapiClient {
-  private client: AxiosInstance;
+  private baseURL = 'https://api.solapi.com';
   private config: SolapiConfig;
 
   constructor(config?: Partial<SolapiConfig>) {
@@ -42,18 +41,6 @@ class SolapiClient {
       senderPhone: config?.senderPhone || process.env.SOLAPI_SENDER_PHONE!,
       kakaoChannelId: config?.kakaoChannelId || process.env.SOLAPI_KAKAO_CHANNEL_ID!,
     };
-
-    this.client = axios.create({
-      baseURL: 'https://api.solapi.com',
-      timeout: 30000,
-    });
-
-    // Add auth header to all requests
-    this.client.interceptors.request.use((config) => {
-      const authHeader = this.generateAuthHeader();
-      config.headers.Authorization = authHeader;
-      return config;
-    });
   }
 
   /**
@@ -71,25 +58,56 @@ class SolapiClient {
   }
 
   /**
+   * Fetch wrapper with auth and timeout
+   */
+  private async fetchWithAuth<T>(
+    endpoint: string,
+    options: RequestInit = {}
+  ): Promise<T> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+    try {
+      const response = await fetch(`${this.baseURL}${endpoint}`, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: this.generateAuthHeader(),
+          ...options.headers,
+        },
+        signal: controller.signal,
+      });
+
+      return response.json();
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  /**
    * Send KakaoTalk AlimTalk message
    */
   async sendAlimTalk(params: SendMessageParams): Promise<SendMessageResult> {
     try {
-      const response = await this.client.post('/messages/v4/send', {
-        messages: [
-          {
-            to: this.formatPhoneNumber(params.to),
-            from: this.config.senderPhone,
-            kakaoOptions: {
-              pfId: this.config.kakaoChannelId,
-              templateId: params.templateId,
-              variables: params.variables,
+      const result = await this.fetchWithAuth<{
+        groupInfo?: { messageId: string; groupId: string };
+        message?: string;
+      }>('/messages/v4/send', {
+        method: 'POST',
+        body: JSON.stringify({
+          messages: [
+            {
+              to: this.formatPhoneNumber(params.to),
+              from: this.config.senderPhone,
+              kakaoOptions: {
+                pfId: this.config.kakaoChannelId,
+                templateId: params.templateId,
+                variables: params.variables,
+              },
             },
-          },
-        ],
+          ],
+        }),
       });
-
-      const result = response.data;
 
       if (result.groupInfo) {
         return {
@@ -101,18 +119,10 @@ class SolapiClient {
 
       return {
         success: false,
-        error: 'No response from Solapi',
+        error: result.message || 'No response from Solapi',
       };
     } catch (error) {
       console.error('Solapi send error:', error);
-
-      if (axios.isAxiosError(error) && error.response) {
-        return {
-          success: false,
-          error: error.response.data?.message || error.message,
-        };
-      }
-
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -137,12 +147,12 @@ class SolapiClient {
         },
       }));
 
-      const response = await this.client.post('/messages/v4/send-many', {
-        messages: formattedMessages,
+      const data = await this.fetchWithAuth<{
+        groupInfo?: { groupId: string };
+      }>('/messages/v4/send-many', {
+        method: 'POST',
+        body: JSON.stringify({ messages: formattedMessages }),
       });
-
-      const results: SendMessageResult[] = [];
-      const data = response.data;
 
       if (data.groupInfo) {
         return {
@@ -176,13 +186,15 @@ class SolapiClient {
    */
   async getMessageStatus(messageId: string): Promise<MessageStatus | null> {
     try {
-      const response = await this.client.get(`/messages/v4/list`, {
-        params: {
-          messageId,
-        },
-      });
+      const response = await this.fetchWithAuth<{
+        messageList?: Array<{
+          messageId: string;
+          status: MessageStatus['status'];
+          statusMessage?: string;
+        }>;
+      }>(`/messages/v4/list?messageId=${encodeURIComponent(messageId)}`);
 
-      const message = response.data.messageList?.[0];
+      const message = response.messageList?.[0];
 
       if (message) {
         return {
@@ -204,8 +216,7 @@ class SolapiClient {
    */
   async getGroupStatus(groupId: string) {
     try {
-      const response = await this.client.get(`/messages/v4/groups/${groupId}`);
-      return response.data;
+      return await this.fetchWithAuth(`/messages/v4/groups/${groupId}`);
     } catch (error) {
       console.error('Get group status error:', error);
       return null;

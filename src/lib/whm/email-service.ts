@@ -78,7 +78,7 @@ export async function createEmailAccount({
       password,
       quota: 1000, // 1GB
       domain: company.domain,
-    });
+    }) as { errors?: string[] };
 
     if (result.errors && result.errors.length > 0) {
       return { success: false, error: result.errors[0] };
@@ -399,7 +399,7 @@ export async function getEmailQuotaUsage(userId: string): Promise<{
       cpanelUser: company.cpanel_username,
       email: user.email,
       domain: company.domain,
-    });
+    }) as { data?: { diskused?: number; diskquota?: number } };
 
     if (result.data) {
       const used = result.data.diskused || 0;
@@ -472,10 +472,11 @@ export async function createEmailAccountSimple({
       const addDomainResult = await whmClient.addAddonDomain({
         cpanelUser,
         domain,
-      });
+      }) as { cpanelresult?: { data?: Array<{ result?: number; reason?: string; error?: string }>; result?: number; error?: string } };
 
       // Check if addon domain was added successfully
-      const addResult = addDomainResult?.cpanelresult?.data?.[0] || addDomainResult?.cpanelresult || {};
+      type AddDomainResultItem = { result?: number; reason?: string; error?: string };
+      const addResult: AddDomainResultItem = addDomainResult?.cpanelresult?.data?.[0] || {} as AddDomainResultItem;
       if (addResult.result === 0 || addResult.error) {
         const errorMsg = addResult.reason || addResult.error || 'Failed to add domain to cPanel';
         // If domain already exists (perhaps as main domain), ignore the error
@@ -486,13 +487,19 @@ export async function createEmailAccountSimple({
     }
 
     // Create email account in cPanel
+    type EmailCreateResult = {
+      result?: { status?: number; errors?: string[]; statusmsg?: string };
+      status?: number;
+      errors?: string[];
+      statusmsg?: string;
+    };
     const result = await whmClient.createEmailAccount({
       cpanelUser,
       email,
       password,
       quota: 1000, // 1GB
       domain,
-    });
+    }) as EmailCreateResult;
 
     // WHM cpanel API response format: { result: { status, errors, data, ... } }
     const apiResult = result.result || result;
